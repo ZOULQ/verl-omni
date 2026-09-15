@@ -788,6 +788,23 @@ class OmniRolloutPipelineBase:
         return ""
 
     @classmethod
+    def default_deploy_config_path(cls, pipeline_mode: str = "thinker_only") -> str | None:
+        """Return the pipeline's default vLLM-Omni deploy YAML path, or ``None``.
+
+        Multi-stage pipelines whose rollout resource placement must be computed
+        from a per-stage deploy config (e.g. MiniCPM-o 4.5) override this to
+        point at their ``vllm_omni/deploy/<pipeline>.yaml``.  ``None`` (the
+        default) preserves the legacy flat rollout layout.
+
+        Args:
+            pipeline_mode: The mode used to build the stages.
+
+        Returns:
+            str | None: A deploy YAML path, or ``None`` to use the flat layout.
+        """
+        return None
+
+    @classmethod
     def ensure_pipeline_registered(cls, pipeline_mode: str = "thinker_only") -> None:
         """Ensure the pipeline for *pipeline_mode* is in vLLM-Omni's registry.
 

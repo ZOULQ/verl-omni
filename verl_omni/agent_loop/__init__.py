@@ -16,6 +16,7 @@
 # @register decorator fires when the agent_loop package is imported. Do not
 # re-export the class from the pipeline package __init__ (import cycle).
 from verl_omni.pipelines.minimax_h3_diffusion_nft.agent_loop import MiniMaxH3DiffusionSingleTurnAgentLoop
+from verl_omni.pipelines.minicpmo_4_5.duplex_agent_loop import MiniCPMODuplexAgentLoop
 
 from .composite_agent_loop import CompositeAgentLoopWorker
 from .diffusion_agent_loop import DiffusionAgentLoopOutput, DiffusionAgentLoopWorker
@@ -34,4 +35,5 @@ __all__ = [
     "DiffusionSingleTurnAgentLoop",
     "OmniSingleTurnAgentLoop",
     "MiniMaxH3DiffusionSingleTurnAgentLoop",
+    "MiniCPMODuplexAgentLoop",
 ]

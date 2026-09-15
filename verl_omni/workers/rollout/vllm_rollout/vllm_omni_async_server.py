@@ -347,6 +347,19 @@ class vLLMOmniHttpServer(vLLMHttpServer):
         negative_extra_prompt_ids: Optional[dict[str, list[int]]] = None,
         priority: int = 0,
     ) -> DiffusionOutput | TokenOutput:
+        if sampling_params and sampling_params.get("duplex"):
+            # Native-duplex training client: drive one session over the
+            # server's /v1/realtime WebSocket endpoint (barge-in flow).
+            duplex_params = dict(sampling_params)
+            duplex_params.pop("duplex", None)
+            return await self._generate_duplex(
+                prompt_ids=prompt_ids,
+                sampling_params=duplex_params,
+                request_id=request_id,
+                audio_data=audio_data,
+                mm_processor_kwargs=mm_processor_kwargs,
+                priority=priority,
+            )
         return await self._generate_strategy.generate(
             prompt_ids=prompt_ids,
             sampling_params=sampling_params,
@@ -360,6 +373,44 @@ class vLLMOmniHttpServer(vLLMHttpServer):
             extra_prompt_ids=extra_prompt_ids,
             negative_extra_prompt_ids=negative_extra_prompt_ids,
             priority=priority,
+        )
+
+    async def _generate_duplex(
+        self,
+        *,
+        prompt_ids: list[int],
+        sampling_params: dict[str, Any],
+        request_id: str,
+        audio_data: Optional[list[Any]],
+        mm_processor_kwargs: Optional[dict[str, Any]],
+        priority: int,
+    ) -> TokenOutput:
+        """Run one native-duplex session over the server's WebSocket endpoint.
+
+        The session flow (open -> stream question -> commit -> collect ->
+        close) and the Thinker trajectory reconstruction live in
+        :func:`verl_omni.workers.rollout.vllm_rollout.vllm_omni_duplex_client.run_duplex_training_session`.
+        ``prompt_ids`` is the actor-side prompt used by the FSDP training
+        forward (not consumed by the duplex rollout itself).
+        """
+        from verl_omni.workers.rollout.vllm_rollout.vllm_omni_duplex_client import (
+            run_duplex_training_session,
+        )
+
+        model_config = getattr(self.engine, "model_config", None)
+        model = getattr(model_config, "model", None) if model_config is not None else None
+        if not model:
+            model = getattr(self.config, "model", None) or "minicpmo_4_5"
+        server_address = str(self._server_address)
+        if ":" in server_address and not server_address.startswith("["):
+            server_address = f"[{server_address}]"
+        return await run_duplex_training_session(
+            server_address=server_address,
+            server_port=self._server_port,
+            model=model,
+            request_id=request_id,
+            audio_data=audio_data,
+            response_length=getattr(self.config, "response_length", None),
         )
 
     # -----------------------------------------------------------------------

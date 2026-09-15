@@ -44,6 +44,7 @@ from verl_omni.trainer.diffusion.ray_diffusion_trainer import (
 from verl_omni.utils.config import validate_config as validate_omni_config
 from verl_omni.utils.fs import resolve_model_local_dir
 from verl_omni.utils.rl_insight import enable_rl_insight
+from verl_omni.utils.rollout_device_layout import normalize_multistage_rollout_world_size
 
 __all__ = [
     "RayTrainerTaskRunner",
@@ -332,6 +333,11 @@ def uses_v1_trainer(config) -> bool:
 def run_omni(config, task_runner_class=None) -> None:
     """Initialize Ray and run distributed Omni training."""
     enable_rl_insight(config)
+
+    # Multi-stage pipelines compute their rollout replica world size from the
+    # per-stage deploy config; fold it into rollout.tp/dp/pp before verl core's
+    # LLMServerManager reads them (covers both the V1 and non-V1 paths below).
+    normalize_multistage_rollout_world_size(config)
 
     if uses_v1_trainer(config):
         from verl.trainer.main_ppo import TaskRunnerV1, run_ppo

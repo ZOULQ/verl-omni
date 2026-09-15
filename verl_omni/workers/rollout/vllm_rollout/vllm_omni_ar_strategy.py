@@ -30,6 +30,7 @@ from vllm_omni.lora.request import LoRARequest
 
 from verl_omni.pipelines.model_base import OmniRolloutPipelineBase
 from verl_omni.pipelines.rollout_request import OmniRolloutRequest
+from verl_omni.utils.rollout_device_layout import resolve_stage_device_layouts, validate_stage_device_layouts
 from verl_omni.workers.config import OmniModelConfig
 from verl_omni.workers.rollout.vllm_rollout.vllm_omni_strategy_base import OmniStrategyBase
 
@@ -177,31 +178,42 @@ class ARStrategy(OmniStrategyBase):
 
         device_control_env = get_visible_devices_keyword()
         visible_devices = os.environ.get(device_control_env, "")
-        tp_size = self.server.config.tensor_model_parallel_size
+        fallback_tp = self.server.config.tensor_model_parallel_size
 
         deploy_dict: dict[str, object] = {"pipeline": pipeline_id}
         async_chunk = engine_kwargs.get("async_chunk", engine_kwargs.get("async-chunk"))
         if async_chunk is not None:
             deploy_dict["async_chunk"] = async_chunk
 
-        if visible_devices:
-            device_count = len([device for device in visible_devices.split(",") if device.strip()])
-            devices = ",".join(str(device_id) for device_id in range(device_count))
-            stage_ids = [stage.stage_id for stage in stages]
-            deploy_dict["stages"] = [
-                {
-                    "stage_id": stage_id,
-                    "devices": devices,
-                    "tensor_parallel_size": tp_size,
-                    "text_encoder_tp_size": getattr(self.server.config, "text_encoder_tp_size", 1),
-                    "engine_extras": stage_extras[stage_id],
-                }
-                for stage_id in stage_ids
-            ]
-        else:
+        if not visible_devices:
             raise RuntimeError(
                 f"Environment variable `{device_control_env}` is not set, cannot generate deploy config."
             )
+        device_count = len([device for device in visible_devices.split(",") if device.strip()])
+        stage_ids = [stage.stage_id for stage in stages]
+
+        layouts = resolve_stage_device_layouts(
+            adapter_cls=adapter_cls,
+            pipeline_mode=pipeline_mode,
+            deploy_config_path=engine_kwargs.get("deploy_config"),
+            fallback_tensor_parallel_size=fallback_tp,
+            stage_ids=stage_ids,
+        )
+        validate_stage_device_layouts(layouts, total_gpus=device_count)
+
+        deploy_dict["stages"] = []
+        for layout in layouts:
+            stage_entry: dict[str, object] = {
+                "stage_id": layout.stage_id,
+                "tensor_parallel_size": layout.tensor_parallel_size,
+                "text_encoder_tp_size": getattr(self.server.config, "text_encoder_tp_size", 1),
+                "engine_extras": stage_extras[layout.stage_id],
+            }
+            if layout.devices_str is not None:
+                stage_entry["devices"] = layout.devices_str
+            if layout.num_replicas > 1:
+                stage_entry["num_replicas"] = layout.num_replicas
+            deploy_dict["stages"].append(stage_entry)
 
         yaml_str = yaml.dump(deploy_dict).strip()
         logger.info("Generated deploy config:\n%s", yaml_str)
